@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import type { Enemy, Hero } from "../core/types";
-import { damageByEnemyToHero, damageByHeroToEnemy } from "../core/balance";
 import { pickPerks3, type Perk } from "../core/perks";
+import { damageByHeroToEnemy } from "../core/balance";
 
 type EnemyGO = Phaser.Physics.Arcade.Sprite & {
     dataEnemy: Enemy;
@@ -13,7 +13,7 @@ export class MainScene extends Phaser.Scene {
     private heroBody!: Phaser.Physics.Arcade.Body;
 
     private enemies!: Phaser.Physics.Arcade.Group;
-
+    private bullets!: Phaser.Physics.Arcade.Group;
     private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
 
     // бой
@@ -24,9 +24,6 @@ export class MainScene extends Phaser.Scene {
     private waveLeftToSpawn = 0;
     private waveAlive = 0;
     private nextSpawnAt = 0;
-
-    // враги бьют героя
-    private enemyNextHitAt = new WeakMap<EnemyGO, number>();
 
     // UI
     private hudText!: Phaser.GameObjects.Text;
@@ -41,7 +38,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     preload() {
-        // создаём простую белую текстуру 1x1, чтобы враги были Sprite (для Arcade Physics)
+        // простая белая текстура 1x1, чтобы работать со Sprite/Image в Arcade
         const g = this.add.graphics();
         g.fillStyle(0xffffff, 1);
         g.fillRect(0, 0, 1, 1);
@@ -62,18 +59,56 @@ export class MainScene extends Phaser.Scene {
                 moveSpeed: 220,
                 range: 160,
                 attackCooldownMs: 450,
-                baseDamage: 10
-            }
+                baseDamage: 10,
+            },
         };
 
-        // Герой как прямоугольник + физика
+        // Герой + физика
         this.heroGO = this.add.rectangle(480, 270, 26, 26, 0x00ff00);
         this.physics.add.existing(this.heroGO);
         this.heroBody = this.heroGO.body as Phaser.Physics.Arcade.Body;
         this.heroBody.setCollideWorldBounds(true);
 
-        // Враги
+        // Группы
         this.enemies = this.physics.add.group();
+        this.bullets = this.physics.add.group({
+            classType: Phaser.Physics.Arcade.Image,
+            runChildUpdate: true,
+        });
+
+        // Урон герою при контакте (враг-камикадзе)
+        this.physics.add.overlap(this.heroGO, this.enemies, (_h, e) => {
+            const enemy = e as EnemyGO;
+
+            this.hero.combat.hp -= enemy.dataEnemy.baseDamage;
+
+            this.tweens.add({
+                targets: this.heroGO,
+                duration: 80,
+                alpha: 0.4,
+                yoyo: true,
+            });
+
+            enemy.destroy();
+            this.waveAlive--;
+        });
+
+        // Пули бьют врагов
+        this.physics.add.overlap(this.bullets, this.enemies, (b, e) => {
+            const bullet = b as Phaser.Physics.Arcade.Image;
+            const enemy = e as EnemyGO;
+
+            enemy.dataEnemy.hp -= bullet.getData("damage");
+            bullet.destroy();
+
+            if (enemy.dataEnemy.hp <= 0) {
+                enemy.destroy();
+                this.waveAlive--;
+
+                this.hero.xp += 5 + this.wave;
+                this.tryLevelUp();
+            }
+        });
 
         // HUD
         this.hudText = this.add
@@ -85,22 +120,22 @@ export class MainScene extends Phaser.Scene {
             .text(this.scale.width / 2, this.scale.height / 2, "", {
                 fontSize: "20px",
                 color: "#ffffff",
-                align: "center"
+                align: "center",
             })
             .setOrigin(0.5)
             .setDepth(100)
             .setVisible(false);
 
-        // клавиши выбора 1/2/3
+        // Выбор 1/2/3
         this.input.keyboard!.on("keydown-ONE", () => this.choosePerk(0));
         this.input.keyboard!.on("keydown-TWO", () => this.choosePerk(1));
         this.input.keyboard!.on("keydown-THREE", () => this.choosePerk(2));
 
-        // стартуем первую волну
+        // Старт волны
         this.startWave(1);
     }
 
-    update(time: number, _delta: number) {
+    update(time: number) {
         if (this.isChoosingPerk) {
             this.heroBody.setVelocity(0, 0);
             return;
@@ -110,7 +145,8 @@ export class MainScene extends Phaser.Scene {
         this.handleSpawning(time);
         this.handleEnemiesAI();
         this.handleHeroAutoAttack(time);
-        this.handleEnemyHitsHero(time);
+        this.cleanupBullets(time);
+
         this.updateHud();
 
         if (this.hero.combat.hp <= 0) {
@@ -128,6 +164,7 @@ export class MainScene extends Phaser.Scene {
         if (this.cursors.up?.isDown) vy -= speed;
         if (this.cursors.down?.isDown) vy += speed;
 
+        // нормализация диагонали
         if (vx !== 0 && vy !== 0) {
             vx *= 0.7071;
             vy *= 0.7071;
@@ -155,7 +192,7 @@ export class MainScene extends Phaser.Scene {
             this.nextSpawnAt = time + interval;
         }
 
-        // Волна пройдена -> выбор перка
+        // Волну зачистили -> выбор перка
         if (this.waveLeftToSpawn === 0 && this.waveAlive === 0) {
             this.openPerkChoice();
         }
@@ -169,12 +206,15 @@ export class MainScene extends Phaser.Scene {
         s.setDisplaySize(22, 22);
         s.setCollideWorldBounds(true);
 
+        // скейл силы врагов с волной
+        const hpMax = 30 + this.wave * 10;
+
         const enemy: Enemy = {
             kind: "grunt",
-            hpMax: 25 + this.wave * 6,
-            hp: 25 + this.wave * 6,
-            moveSpeed: 90 + this.wave * 3,
-            baseDamage: 6 + Math.floor(this.wave * 0.6)
+            hpMax,
+            hp: hpMax,
+            moveSpeed: 100 + this.wave * 4,
+            baseDamage: 8 + this.wave * 2,
         };
 
         s.dataEnemy = enemy;
@@ -218,7 +258,7 @@ export class MainScene extends Phaser.Scene {
         });
     }
 
-    // -------- Combat: hero auto-attacks nearest --------
+    // -------- Combat: hero ranged auto-attack --------
 
     private handleHeroAutoAttack(time: number) {
         if (time < this.nextHeroAttackAt) return;
@@ -226,26 +266,42 @@ export class MainScene extends Phaser.Scene {
         const target = this.findNearestEnemyInRange(this.hero.combat.range);
         if (!target) return;
 
-        const dmg = damageByHeroToEnemy(this.hero);
-        target.dataEnemy.hp -= dmg;
+        const bullet = this.bullets.get(
+            this.heroGO.x,
+            this.heroGO.y,
+            "pixel",
+        ) as Phaser.Physics.Arcade.Image;
 
-        // лёгкий эффект попадания
-        this.tweens.add({
-            targets: target,
-            duration: 80,
-            alpha: 0.3,
-            yoyo: true
-        });
+        if (!bullet) return;
 
-        if (target.dataEnemy.hp <= 0) {
-            target.destroy();
-            this.waveAlive--;
+        bullet.setActive(true).setVisible(true);
+        bullet.setTint(0xffff66);
+        bullet.setDisplaySize(6, 6);
 
-            this.hero.xp += 5 + this.wave;
-            this.tryLevelUp();
-        }
+        const angle = Phaser.Math.Angle.Between(
+            this.heroGO.x,
+            this.heroGO.y,
+            target.x,
+            target.y,
+        );
+
+        const speed = 520;
+        bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+
+        bullet.setData("damage", damageByHeroToEnemy(this.hero));
+        bullet.setData("lifeTime", time + 900);
 
         this.nextHeroAttackAt = time + this.hero.combat.attackCooldownMs;
+    }
+
+    private cleanupBullets(time: number) {
+        this.bullets.children.each((obj) => {
+            const b = obj as Phaser.Physics.Arcade.Image;
+            if (!b.active) return;
+            if (time > (b.getData("lifeTime") as number)) {
+                b.destroy();
+            }
+        });
     }
 
     private findNearestEnemyInRange(range: number): EnemyGO | null {
@@ -269,37 +325,7 @@ export class MainScene extends Phaser.Scene {
         return best;
     }
 
-    // -------- Enemies hit hero if close --------
-
-    private handleEnemyHitsHero(time: number) {
-        const hx = this.heroGO.x;
-        const hy = this.heroGO.y;
-
-        this.enemies.children.each((obj) => {
-            const e = obj as EnemyGO;
-            if (!e.active || !e.dataEnemy) return;
-
-            const d = Phaser.Math.Distance.Between(hx, hy, e.x, e.y);
-            if (d > 22) return;
-
-            const next = this.enemyNextHitAt.get(e) ?? 0;
-            if (time < next) return;
-
-            const dmg = damageByEnemyToHero(e.dataEnemy.baseDamage, this.hero);
-            this.hero.combat.hp -= dmg;
-
-            this.tweens.add({
-                targets: this.heroGO,
-                duration: 60,
-                alpha: 0.4,
-                yoyo: true
-            });
-
-            this.enemyNextHitAt.set(e, time + 700);
-        });
-    }
-
-    // -------- Level up (Heroes-like base) --------
+    // -------- Level up (пока базово) --------
 
     private tryLevelUp() {
         const need = 30 + (this.hero.lvl - 1) * 20;
@@ -308,22 +334,25 @@ export class MainScene extends Phaser.Scene {
         this.hero.xp -= need;
         this.hero.lvl++;
 
-        // первичные статы — пока рандом
+        // первичные статы пока рандом (позже сделаем классы Heroes 3)
         const roll = Phaser.Math.Between(1, 4);
         if (roll === 1) this.hero.stats.attack++;
         if (roll === 2) this.hero.stats.defense++;
         if (roll === 3) this.hero.stats.power++;
         if (roll === 4) this.hero.stats.knowledge++;
 
-        // небольшой рост выживаемости
+        // чуть живучести за уровень
         this.hero.combat.hpMax += 5;
-        this.hero.combat.hp = Math.min(this.hero.combat.hp + 20, this.hero.combat.hpMax);
+        this.hero.combat.hp = Math.min(
+            this.hero.combat.hp + 20,
+            this.hero.combat.hpMax,
+        );
     }
 
     // -------- Perk choice between waves --------
 
     private openPerkChoice() {
-        if (this.isChoosingPerk) return; // защита от повторного вызова
+        if (this.isChoosingPerk) return;
         this.isChoosingPerk = true;
         this.perkChoices = pickPerks3();
 
@@ -334,7 +363,7 @@ export class MainScene extends Phaser.Scene {
             `2) ${this.perkChoices[1].title} — ${this.perkChoices[1].desc}`,
             `3) ${this.perkChoices[2].title} — ${this.perkChoices[2].desc}`,
             ``,
-            `Нажми 1 / 2 / 3`
+            `Нажми 1 / 2 / 3`,
         ];
 
         this.perkText.setText(lines.join("\n")).setVisible(true);
@@ -357,12 +386,12 @@ export class MainScene extends Phaser.Scene {
         const h = this.hero;
         this.hudText.setText(
             [
-                `Wave: ${this.wave}  (left: ${this.waveLeftToSpawn}, alive: ${this.waveAlive})`,
-                `HP: ${h.combat.hp}/${h.combat.hpMax}`,
-                `Lvl: ${h.lvl}  XP: ${h.xp}`,
-                `A:${h.stats.attack}  D:${h.stats.defense}  P:${h.stats.power}  K:${h.stats.knowledge}`,
-                `Dmg: ${damageByHeroToEnemy(h)}  Range: ${h.combat.range}`
-            ].join("\n")
+                `Wave: ${this.wave}`,
+                `HP: ${h.combat.hp} / ${h.combat.hpMax}`,
+                `Damage: ${damageByHeroToEnemy(h)}`,
+                `Range: ${h.combat.range}`,
+                `Enemies alive: ${this.waveAlive}`,
+            ].join("\n"),
         );
     }
 }

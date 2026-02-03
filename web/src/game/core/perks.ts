@@ -1,6 +1,6 @@
 import type { Hero } from "./types";
 
-export type PerkId = "offense" | "armorer" | "archery" | "logistics" | "haste";
+export type PerkId = "damage" | "range" | "haste";
 
 export type Perk = {
     id: PerkId;
@@ -11,48 +11,36 @@ export type Perk = {
 
 export const PERKS: Perk[] = [
     {
-        id: "offense",
-        title: "Offense",
-        desc: "+15% урона",
+        id: "damage",
+        title: "Sharpened Arrows",
+        desc: "+25% урона",
         apply: (h) => {
-            h.combat.baseDamage = Math.round(h.combat.baseDamage * 1.15);
-        }
+            h.combat.baseDamage = Math.round(h.combat.baseDamage * 1.25);
+        },
     },
     {
-        id: "armorer",
-        title: "Armorer",
-        desc: "+1 Defense",
+        id: "range",
+        title: "Longbow",
+        desc: "+30% дальности",
         apply: (h) => {
-            h.stats.defense += 1;
-        }
-    },
-    {
-        id: "archery",
-        title: "Archery",
-        desc: "+20% дальность атаки",
-        apply: (h) => {
-            h.combat.range = Math.round(h.combat.range * 1.2);
-        }
-    },
-    {
-        id: "logistics",
-        title: "Logistics",
-        desc: "+12% скорость движения",
-        apply: (h) => {
-            h.combat.moveSpeed = Math.round(h.combat.moveSpeed * 1.12);
-        }
+            h.combat.range = Math.round(h.combat.range * 1.3);
+        },
     },
     {
         id: "haste",
-        title: "Haste",
-        desc: "-12% кулдаун автоатаки",
+        title: "Quick Hands",
+        desc: "-15% перезарядки",
         apply: (h) => {
-            h.combat.attackCooldownMs = Math.max(120, Math.round(h.combat.attackCooldownMs * 0.88));
-        }
-    }
+            h.combat.attackCooldownMs = Math.max(
+                120,
+                Math.round(h.combat.attackCooldownMs * 0.85),
+            );
+        },
+    },
 ];
 
 export function pickPerks3(): Perk[] {
+    // выбор без повторов
     const copy = [...PERKS];
     for (let i = copy.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
