@@ -3,16 +3,34 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:build": "npm run build && electron-builder"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {
     "phaser": "^3.90.0"
+  },
+  "build": {
+    "appId": "com.procenkin.rogalike",
+    "productName": "Rogalike",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
   }
 }

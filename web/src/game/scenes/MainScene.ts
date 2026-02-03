@@ -52,7 +52,7 @@ export class MainScene extends Phaser.Scene {
         this.hero = {
             lvl: 1,
             xp: 0,
-            stats: { attack: 1, defense: 1, power: 1, knowledge: 1 },
+            stats: { attack: 50, defense: 1, power: 1, knowledge: 1 },
             combat: {
                 hpMax: 100,
                 hp: 100,
@@ -245,18 +245,24 @@ export class MainScene extends Phaser.Scene {
 
         this.enemies.children.each((obj) => {
             const e = obj as EnemyGO;
-            if (!e.active || !e.dataEnemy) return;
+            if (!e.active || !e.dataEnemy) return true;
+
+            const body = e.body as Phaser.Physics.Arcade.Body | null;
+            if (!body) return true;
 
             const dx = hx - e.x;
             const dy = hy - e.y;
             const len = Math.hypot(dx, dy) || 1;
 
-            const vx = (dx / len) * e.dataEnemy.moveSpeed;
-            const vy = (dy / len) * e.dataEnemy.moveSpeed;
+            body.setVelocity(
+                (dx / len) * e.dataEnemy.moveSpeed,
+                (dy / len) * e.dataEnemy.moveSpeed
+            );
 
-            e.body.setVelocity(vx, vy);
+            return true;
         });
     }
+
 
     // -------- Combat: hero ranged auto-attack --------
 
@@ -297,10 +303,11 @@ export class MainScene extends Phaser.Scene {
     private cleanupBullets(time: number) {
         this.bullets.children.each((obj) => {
             const b = obj as Phaser.Physics.Arcade.Image;
-            if (!b.active) return;
+            if (!b.active) return true;
             if (time > (b.getData("lifeTime") as number)) {
                 b.destroy();
             }
+            return true;
         });
     }
 
@@ -313,13 +320,15 @@ export class MainScene extends Phaser.Scene {
 
         this.enemies.children.each((obj) => {
             const e = obj as EnemyGO;
-            if (!e.active || !e.dataEnemy) return;
+            if (!e.active || !e.dataEnemy) return true;
 
             const d = Phaser.Math.Distance.Between(hx, hy, e.x, e.y);
             if (d <= range && d < bestDist) {
                 bestDist = d;
                 best = e;
             }
+
+            return true;
         });
 
         return best;
