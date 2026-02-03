@@ -11,7 +11,7 @@ build/
 # Vite
 .vite/
 
-# Capacitor / Mobile (позже)
+# Capacitor / Mobile
 android/
 ios/
 
